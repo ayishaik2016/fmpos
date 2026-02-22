@@ -1,0 +1,14 @@
+<select class="form-select single-select-clear-field" id="{{ $dropdownName }}" name="{{ $dropdownName }}" data-placeholder="Choose one thing">
+    <option></option>
+    @if(!empty($users))
+        @foreach ($users as $user)
+            <option value="{{ $user->id }}" {{ $selected == $user->id ? 'selected' : '' }}>
+                @if($showOnlyUsername)
+                    {{ $user->username }}
+                    @else
+                    {{ $user->first_name .' '.$user->last_name }}
+                @endif
+            </option>
+        @endforeach
+    @endif
+</select>

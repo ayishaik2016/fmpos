@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en" dir="{{ $appDirection }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ $invoiceData['name'] }}</title>
+    <link href="{{ versionedAsset('assets/css/bootstrap.min.css') }}" rel="stylesheet">
+    <link rel="stylesheet" href="{{ versionedAsset('custom/css/print/pos.css') }}?v"/>
+</head>
+<body>
+    <div class="invoice-wrapper">
+        <div class="container mt-3">
+            <div class="invoice-header">
+                 @php
+                    $companyLogo = url('/company/getimage/'.app('company')['colored_logo']);
+                @endphp
+                <div class="invoice-logo"><img width="150" src="{{ $companyLogo }}" alt="Logo" class="company-logo"></div>
+                <div class="invoice-title">
+                    <span>{{ app('company')['name'] }}</span><br>
+                    <span>(1447932-K)</span>
+                </div>
+                <div>
+                    {{ app('company')['address'] }}
+                        <p>
+                            @if(app('company')['mobile'])
+                                <span>{{ app('company')['mobile'] ? 'Contact: '. app('company')['mobile'] : ''}}</span>
+                            @endif
+                        <br>
+                            @if(app('company')['mobile'] || app('company')['email'])
+                                <span>{{ app('company')['email'] ? ' Mail: '.app('company')['email'] : '' }}</span>
+                            @endif
+                            @if(app('company')['tax_number']!= '' && app('company')['tax_type'] != 'no-tax')
+                                <br>{{ app('company')['tax_type'] == 'gst' ? 'GST:' : __('tax.tax') . ':' }} {{ app('company')['tax_number'] }}
+                            @endif
+                        </p>
+                </div>
+            </div>
+
+            <div class="text-center"><h6>{{ $invoiceData['name'] }}</h6></div>
+
+            <div class="row">
+                <div class="col-6">
+                    <div>{{ __('app.name') }}: {{ $sale->party->first_name.' '. $sale->party->last_name }}</div>
+                    <div>{{ __('app.mobile') }}: {{ $sale->party->mobile }}</div>
+                    <!-- <div>{{ __('sale.sales') }}: {{ $sale->user->first_name.' '. $sale->user->last_name }}</div> -->
+                    {{-- Party Tax/GST Number --}}
+                    @include('print.common.party-tax-details', ['model' => $sale, 'isPOSInvoice'    => true])
+
+                </div>
+                <div class="col-6 text-end">
+                    <div>{{ __('sale.invoice') }}: #{{ $sale->sale_code  }}</div>
+                    <div>{{ __('app.date') }}: {{ $sale->formatted_sale_date  }}</div>
+                    <div>{{ __('app.time') }}: {{ $sale->format_created_time  }}</div>
+                    @if(!empty($sale->reference_no))
+                        <div>{{ __('app.reference_no') }}: {{ $sale->reference_no }}</div>
+                    @endif
+                </div>
+            </div>
+
+            <div class="row mt-2">
+                <span><b>Sales Person</b></span><br>
+                <div class="col-6"><span>{{ __('sale.name') }}: {{ $sale->user->first_name.' '. $sale->user->last_name }}</span><br></div>
+                <div class="col-6 text-end"><span>{{ __('sale.mobile') }}: {{ $sale->user->mobile }}</span></div>
+            </div>
+
+            <table class="table table-sm mt-2">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>{{ __('app.description') }}</th>
+                        <th class="text-end">{{ __('app.price_per_unit') }}</th>
+                        <th class="text-end">{{ __('app.qty') }}</th>
+                        <th class="text-end">{{ __('app.total') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @php
+                        $i=1;
+                    @endphp
+
+                    @foreach($sale->itemTransaction as $transaction)
+                    <tr>
+                        <td>{{ $i++ }}</td>
+                        <td>
+                            {{ $transaction->item->name }}
+                            <small>{{ $transaction->description }}</small>
+                            {{-- Show Brand Name --}}
+                            @include('print.common.brand-details', ['model' => $transaction])
+                            <small>
+                                @if ($transaction->itemSerialTransaction->count() > 0)
+                                    <br>{{ $transaction->itemSerialTransaction->pluck('itemSerialMaster.serial_code')->implode(',') }}<br>
+                                @endif
+                                @if($transaction->batch)
+                                    <br>
+                                    <i>{{ __('item.batch') }}</i>
+                                    {{ $transaction->batch->itemBatchMaster->batch_no }}
+                                    <!-- Check is expire_date exist then show -->
+                                     @if($transaction->batch->itemBatchMaster->exp_date)
+                                     ,<i>{{ __('item.exp') }}</i> {{ $formatDate->toUserDateFormat($transaction->batch->itemBatchMaster->exp_date) }}
+                                     @endif
+                                @endif
+
+                            </small>
+                        </td>
+                        <td class="text-end">{{ $formatNumber->formatWithPrecision($transaction->total/$transaction->quantity) }}</td>
+                        <td class="text-end">{{ $formatNumber->formatQuantity($transaction->quantity) }}</td>
+
+
+                        {{--
+                            Note:
+                                Calculate Total = (Unit Price - Discount) + Tax
+                                Here we are showing only Total, in below destriburted the discount and Tax
+                        --}}
+                        <td class="text-end">{{ $formatNumber->formatWithPrecision($transaction->total) }}</td>
+
+
+
+                    </tr>
+                    @endforeach
+
+                    @php
+                       $totalQty = $sale->itemTransaction->sum(function ($transaction) {
+                            return $transaction->quantity;
+                        });
+                    @endphp
+                    <tr class="text-end fw-bold">
+                        <td colspan="3">{{ __('app.total') }}</td>
+                        <td>{{ $formatNumber->formatQuantity($totalQty) }}</td>
+                        <td>{{ $formatNumber->formatWithPrecision($sale->grand_total) }}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="row text-end">
+                @php
+                    $subtotal = $sale->itemTransaction->sum(function ($transaction) {
+                                /*if($transaction->tax_type == 'inclusive'){
+                                    $unitPrice = calculatePrice($transaction->unit_price, $transaction->tax->rate, needInclusive: true);
+                                }else{
+                                    $unitPrice = calculatePrice($transaction->unit_price, $transaction->tax->rate, needInclusive: false);
+                                }*/
+                                $unitPrice = $transaction->unit_price;
+                                return $unitPrice * $transaction->quantity;
+                            });
+                    $discount = $sale->itemTransaction->sum(function ($transaction) {
+                                return $transaction->discount_amount;
+                            });
+
+                    $taxAmount = $sale->itemTransaction->sum(function ($transaction) {
+                                return $transaction->tax_amount;
+                            });
+
+                @endphp
+                <div class="col-8 text-end"><strong>{{ __('app.subtotal') }}({{$currencyDetail->symbol}})</strong></div>
+                <div class="col-4">{{ $formatNumber->formatWithPrecision($subtotal) }}</div>
+
+                @if(app('company')['tax_type'] != 'no-tax')
+                    <div class="col-8 text-end"><strong>{{ __('tax.tax') }}({{$currencyDetail->symbol}})</strong></div>
+                    <div class="col-4">{{ $formatNumber->formatWithPrecision($taxAmount) }}</div>
+                @endif
+
+                <div class="col-8 text-end"><strong>{{ __('app.grand_total') }}({{$currencyDetail->symbol}})</strong></div>
+                <div class="col-4">{{ $formatNumber->formatWithPrecision($sale->grand_total) }}</div>
+
+                <div class="col-8 text-end"><strong>{{ __('payment.paid_amount') }}({{$currencyDetail->symbol}})</strong></div>
+                <div class="col-4">{{ $formatNumber->formatWithPrecision($sale->paid_amount) }}</div>
+
+                <div class="col-8 text-end"><strong>{{ __('payment.balance') }}({{$currencyDetail->symbol}})</strong></div>
+                <div class="col-4">{{ $formatNumber->formatWithPrecision($sale->grand_total - $sale->paid_amount) }}</div>
+
+
+                @if(app('company')['show_mrp'])
+                    @php
+                        $savedAmount = $sale->itemTransaction->sum(function ($transaction) {
+                                    if($transaction->mrp > 0){
+                                        return ($transaction->mrp * $transaction->quantity) - $transaction->total;
+                                    }else{
+                                        return 0;
+                                    }
+                            });
+
+                    @endphp
+                @endif
+
+                @if(app('company')['show_party_due_payment'])
+                    @php
+                        $partyTotalDue = $sale->party->getPartyTotalDueBalance();
+                        $partyTotalDueBalance = $partyTotalDue['balance'];
+                    @endphp
+                <tr>
+                    <div class="col-8 text-end"><strong>{{ __('app.previous_due') }}({{$currencyDetail->symbol}})</strong></div>
+                    <div class="col-4">{{ $formatNumber->formatWithPrecision($partyTotalDueBalance - ($sale->grand_total - $sale->paid_amount) ) }}</div>
+                </tr>
+                <tr>
+                    <div class="col-8 text-end"><strong>{{ __('app.total_due_balance') . ($partyTotalDue['status'] == 'you_pay' ? '(You Pay)' : '(Receive)') }}({{$currencyDetail->symbol}})</strong></div>
+                    <div class="col-4">{{ $formatNumber->formatWithPrecision($partyTotalDueBalance) }}</div>
+                </tr>
+                @endif
+
+
+            </div>
+
+            @if(app('company')['show_tax_summary'] && app('company')['tax_type'] != 'no-tax')
+        <table class="table table-bordered custom-table tax-breakdown table-compact">
+            <thead>
+                @if(app('company')['tax_type'] == 'tax')
+                    <tr>
+                        <th>{{ __('tax.tax') }}</th>
+                        <th>{{ __('tax.taxable_amount') }}</th>
+                        <th>{{ __('tax.rate') }}</th>
+                        <th>{{ __('tax.tax_amount') }}</th>
+                    </tr>
+                 @else
+                    {{-- GST --}}
+                     <tr>
+                        <th rowspan="2">{{ __('item.hsn') }}</th>
+                        <th rowspan="2">{{ __('tax.taxable_amount') }}({{$currencyDetail->symbol}})</th>
+                        <th colspan="2" class="text-center">{{ __('tax.gst') }}</th>
+                        <th rowspan="2">{{ __('tax.tax_amount') }}({{$currencyDetail->symbol}})</th>
+                    </tr>
+                    <tr>
+                        <th>{{ __('tax.rate') }}%</th>
+                        <th>{{ __('app.amount') }}</th>
+                    </tr>
+                @endif
+            </thead>
+            <tbody>
+                @php
+
+                if(app('company')['tax_type'] == 'tax'){
+                    $taxSummary = $sale->itemTransaction
+                        ->groupBy('tax_id')
+                        ->map(function ($group) {
+                            $firstItem = $group->first();
+                            $totalTaxableAmount = $group->sum(function ($item) use ($firstItem) {
+                                $totalOfEachItem = ($item->unit_price * $item->quantity) - $item->discount_amount;
+                                return $totalOfEachItem;
+                                /*
+                                if ($item->tax_type == 'inclusive') {
+                                    return calculatePrice($totalOfEachItem, $firstItem->tax->rate, needInclusive: true);
+                                } else {
+                                    return calculatePrice($totalOfEachItem, $firstItem->tax->rate, needInclusive: false);
+                                }*/
+                            });
+                            return [
+                                'tax_id' => $firstItem->tax_id,
+                                'tax_name' => $firstItem->tax->name,
+                                'tax_rate' => $firstItem->tax->rate,
+                                'total_taxable_amount' => $totalTaxableAmount,
+                                'total_tax' => $group->sum('tax_amount')
+                            ];
+                        })
+                        ->values();
+                }
+                else{
+                    //GST
+                    $taxSummary = $sale->itemTransaction
+                    ->groupBy('item.hsn') // First group by HSN
+                    ->map(function ($hsnGroup) {
+                        return $hsnGroup->groupBy('tax_id') // Then group by tax_id within each HSN group
+                            ->map(function ($group) {
+                                $firstItem = $group->first();
+                                $totalTaxableAmount = $group->sum(function ($item) {
+                                    $totalOfEachItem = ($item->unit_price * $item->quantity) - $item->discount_amount;
+                                    return $totalOfEachItem;
+                                    /*
+                                    if ($item->tax_type == 'inclusive') {
+                                        return calculatePrice($totalOfEachItem, $item->tax->rate, needInclusive: true);
+                                    } else {
+                                        return calculatePrice($totalOfEachItem, $item->tax->rate, needInclusive: false);
+                                    }*/
+                                });
+                                return [
+                                    'hsn' => $firstItem->item->hsn,
+                                    'tax_id' => $firstItem->tax_id,
+                                    'tax_name' => $firstItem->tax->name,
+                                    'tax_rate' => $firstItem->tax->rate,
+                                    'total_taxable_amount' => $totalTaxableAmount,
+                                    'total_tax' => $group->sum('tax_amount')
+                                ];
+                            });
+                    })
+                    ->flatMap(function ($hsnGroup) {
+                        return $hsnGroup;
+                    })
+                    ->values();
+                }
+
+                @endphp
+                @foreach($taxSummary as $summary)
+                    @if(app('company')['tax_type'] == 'tax')
+
+
+                    <tr>
+                        <td>{{ $summary['tax_name'] }}</td>
+                        <td class="text-end">{{ $formatNumber->formatWithPrecision($summary['total_taxable_amount']) }}</td>
+                        <td class="text-center">{{ $summary['tax_rate'] }}%</td>
+                        <td class="text-end">{{ $formatNumber->formatWithPrecision($summary['total_tax']) }}</td>
+                    </tr>
+                    @else
+                    <tr>
+                        @php
+                            $isCSGST = (empty($sale->state_id) || app('company')['state_id'] == $sale->state_id) ? true:false;
+                        @endphp
+                        <td>{{ $summary['hsn'] }}</td>
+                        <td class="text-end">{{ $formatNumber->formatWithPrecision($summary['total_taxable_amount']) }}</td>
+
+                        @php
+                            $cs_gst = $i_gst = '';
+                            $cs_gst_amt = $i_gst_amt = '';
+                            if($isCSGST){
+                                $cs_gst = ($summary['tax_rate']/2).'%';
+                                $cs_gst_amt = $formatNumber->formatWithPrecision($summary['total_tax']/2);
+                            }else{
+                                $i_gst = ($summary['tax_rate']).'%';
+                                $i_gst_amt = $formatNumber->formatWithPrecision($summary['total_tax']);
+                            }
+                        @endphp
+                        @if($isCSGST)
+                            <!-- CGST & SGT -->
+                            <td class="text-center">{{ $cs_gst }}</td>
+                            <td class="text-end">{{ $cs_gst_amt }}</td>
+                        @else
+                            <!-- IGST -->
+                            <td class="text-center">{{ $i_gst }}</td>
+                            <td class="text-end">{{ $i_gst_amt }}</td>
+                        @endif
+                        <td class="text-end">{{ $formatNumber->formatWithPrecision($summary['total_tax']) }}</td>
+                    </tr>
+                    @endif
+                @endforeach
+            </tbody>
+        </table>
+        @endif
+        </div>
+    </div>
+     <div class="container mt-3 mb-3 hide-print-btn">
+        <a class="btn btn-success print-btn" href="{{ url('sale/invoice/list') }}">Back</a>
+    </div>
+    <script type="text/javascript">
+        window.print();
+    </script>
+</body>
+</html>
